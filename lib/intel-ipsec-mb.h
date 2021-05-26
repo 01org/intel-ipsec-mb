@@ -103,6 +103,7 @@ typedef enum {
         IMB_ARCH_AVX,
         IMB_ARCH_AVX2,
         IMB_ARCH_AVX512,
+        IMB_ARCH_AARCH64,
         IMB_ARCH_NUM,
 } IMB_ARCH;
 
@@ -927,6 +928,9 @@ typedef uint32_t (*crc32_fn_t)(const void *, const uint64_t);
 #define IMB_FEATURE_GFNI       (1ULL << 16)
 #define IMB_FEATURE_AVX512_IFMA (1ULL << 17)
 
+#define IMB_FEATURE_AARCH64    (1ULL << 18)
+#define IMB_FEATURE_ASIMD      (1ULL << 19)
+
 /* ========================================================================== */
 /* TOP LEVEL (IMB_MGR) Data structure fields */
 
@@ -1193,6 +1197,14 @@ IMB_DLL_EXPORT IMB_JOB *flush_job_sse(IMB_MGR *state);
 IMB_DLL_EXPORT uint32_t queue_size_sse(IMB_MGR *state);
 IMB_DLL_EXPORT IMB_JOB *get_completed_job_sse(IMB_MGR *state);
 IMB_DLL_EXPORT IMB_JOB *get_next_job_sse(IMB_MGR *state);
+
+IMB_DLL_EXPORT void init_mb_mgr_aarch64(IMB_MGR *state);
+IMB_DLL_EXPORT IMB_JOB *submit_job_aarch64(IMB_MGR *state);
+IMB_DLL_EXPORT IMB_JOB *submit_job_nocheck_aarch64(IMB_MGR *state);
+IMB_DLL_EXPORT IMB_JOB *flush_job_aarch64(IMB_MGR *state);
+IMB_DLL_EXPORT uint32_t queue_size_aarch64(IMB_MGR *state);
+IMB_DLL_EXPORT IMB_JOB *get_completed_job_aarch64(IMB_MGR *state);
+IMB_DLL_EXPORT IMB_JOB *get_next_job_aarch64(IMB_MGR *state);
 
 /**
  * @brief Automatically initialize most performant
