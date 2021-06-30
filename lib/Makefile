@@ -24,7 +24,6 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-
 LIB = libIPSec_MB
 SHARED ?= y
 IMB_HDR = intel-ipsec-mb.h
@@ -34,6 +33,8 @@ IMB_VERSION = $(shell grep -e "IMB_VERSION_STR" $(IMB_HDR) | cut -d'"' -f2)
 ifeq ($(IMB_VERSION),)
 $(error "Failed to detect library version!")
 endif
+
+ARCH = $(shell uname -m)
 
 VERSION = $(shell echo $(IMB_VERSION) | cut -d. -f1-3)
 SO_VERSION = $(shell echo $(VERSION) | cut -d. -f1)
@@ -46,6 +47,7 @@ MAN1 = libipsec-mb.7
 MAN2 = libipsec-mb-dev.7
 NOLDCONFIG ?= n
 
+ifneq ($(ARCH),aarch64)
 USE_YASM ?= n
 YASM ?= yasm
 NASM ?= nasm
@@ -66,12 +68,14 @@ NASM_GE_MINOR = $(shell [ $(NASM_MINOR_VER) -ge $(NASM_MINOR_REQ) ] && echo true
 ifneq ($(NASM_GE_MAJOR),true)
 $(warning "NASM version found: $(NASM_VERSION)")
 $(error "Minimum required: $(NASM_MAJOR_REQ).$(NASM_MINOR_REQ)")
-endif
+endif # NASM_GE_MAJOR
 ifneq ($(NASM_GE_MINOR),true)
 $(warning "NASM version found: $(NASM_VERSION)")
 $(error "Minimum required: $(NASM_MAJOR_REQ).$(NASM_MINOR_REQ)")
-endif
-endif
+endif # NASM_GE_MINOR
+endif # ASM_VERSION
+
+endif # AARCH64
 
 OBJ_DIR ?= obj
 LIB_DIR ?= .
@@ -95,17 +99,18 @@ CFLAGS := -DLINUX -DNO_COMPAT_IMB_API_053 $(EXTRA_CFLAGS) $(INCLUDES) \
 	-Wstrict-prototypes -Wmissing-prototypes -Wold-style-definition \
 	-fno-strict-overflow -fno-delete-null-pointer-checks -fwrapv
 
+ASM_INCLUDE_DIRS := .
+
+ifneq ($(ARCH),aarch64)
 ifeq ($(CC_HAS_CET),1)
 CFLAGS += -fcf-protection=full
 endif
-
-ASM_INCLUDE_DIRS := .
-
 YASM_INCLUDES := $(foreach i,$(ASM_INCLUDE_DIRS),-I $i)
 YASM_FLAGS := -f x64 -f elf64 -X gnu -g dwarf2 -DLINUX -D__linux__ $(YASM_INCLUDES)
 
 NASM_INCLUDES := $(foreach i,$(ASM_INCLUDE_DIRS),-I$i/)
 NASM_FLAGS := -Werror -felf64 -Xgnu -gdwarf -DLINUX -D__linux__ $(NASM_INCLUDES)
+endif # AARCH64
 
 DEBUG_OPT ?= -O0
 ifeq ($(DEBUG),y)
@@ -119,20 +124,26 @@ endif
 
 ifneq ($(SAFE_DATA),n)
 CFLAGS += -DSAFE_DATA
+ifneq ($(ARCH),aarch64)
 NASM_FLAGS += -DSAFE_DATA
 YASM_FLAGS += -DSAFE_DATA
+endif
 endif
 
 ifneq ($(SAFE_PARAM),n)
 CFLAGS += -DSAFE_PARAM
+ifneq ($(ARCH),aarch64)
 NASM_FLAGS += -DSAFE_PARAM
 YASM_FLAGS += -DSAFE_PARAM
+endif
 endif
 
 ifneq ($(SAFE_LOOKUP),n)
 CFLAGS += -DSAFE_LOOKUP
+ifneq ($(ARCH),aarch64)
 NASM_FLAGS += -DSAFE_LOOKUP
 YASM_FLAGS += -DSAFE_LOOKUP
+endif
 endif
 
 # prevent SIMD optimizations for non-aesni modules
@@ -140,35 +151,49 @@ CFLAGS_NO_SIMD = $(CFLAGS) -O1
 CFLAGS += $(OPT)
 
 # Set generic architectural optimizations
+ifneq ($(ARCH),aarch64)
 OPT_X86 := -msse4.2
 OPT_SSE := -msse4.2 -maes -mpclmul
 OPT_AVX := -mavx -maes -mpclmul
 OPT_AVX2 := -mavx2 -maes -mpclmul
 OPT_AVX512 := -mavx2 -maes -mpclmul # -mavx512f is not available until gcc 4.9
 OPT_NOAESNI := -msse4.2 -mno-aes -mno-pclmul
+else
+OPT_AARCH64 := -march=armv8-a+crypto+aes
+OPT_NOAESNI := -march=armv8-a
+endif
 
 # Set architectural optimizations for GCC/CC
 ifeq ($(CC),$(filter $(CC),gcc cc))
 GCC_VERSION = $(shell $(CC) -dumpversion | cut -d. -f1)
 GCC_GE_V5 = $(shell [ $(GCC_VERSION) -ge 5 ] && echo true)
 ifeq ($(GCC_GE_V5),true)
+ifeq ($(ARCH),aarch64)
+OPT_AARCH64 := -march=armv8-a+crypto+aes
+OPT_NOAESNI := -march=armv8-a
+else
 OPT_SSE := -march=nehalem -maes -mpclmul
 OPT_AVX := -march=sandybridge -maes -mpclmul
 OPT_AVX2 := -march=haswell -maes -mpclmul
 OPT_AVX512 := -march=broadwell -maes -mpclmul
 OPT_NOAESNI := -march=nehalem -mno-pclmul
-endif
-endif
+endif # AARCH64
+endif # GCC
+endif # CC
 
 # Set architectural optimizations for clang
 ifeq ($(CC),$(filter $(CC),clang))
 CLANG_VERSION = $(shell $(CC) --version | head -n 1 | cut -d ' ' -f 3)
 CLANG_GE_V381 = $(shell test "$(CLANG_VERSION)" \> "3.8.0" && echo true)
 ifeq ($(CLANG_GE_V381),true)
+ifeq ($(ARCH),aarch64)
+OPT_AARCH64 := -march=armv8-a+crypto+aes
+else
 OPT_SSE := -march=nehalem -maes -mpclmul
 OPT_AVX := -march=sandybridge -maes -mpclmul
 OPT_AVX2 := -march=haswell -maes -mpclmul
 OPT_AVX512 := -march=broadwell -maes -mpclmul
+endif
 endif
 # remove CFLAGS that clang warns about
 CFLAGS := $(subst -fno-delete-null-pointer-checks,,$(CFLAGS))
@@ -208,6 +233,24 @@ SAFE_LOOKUP_MSG2="Lookups which depend on sensitive information \
 #
 # List of C modules (any origin)
 #
+ifeq ($(ARCH),aarch64)
+c_lib_objs := \
+	mb_mgr_aarch64.o \
+	mb_mgr_auto_aarch64.o \
+	mb_mgr_aarch64_no_aesni.o \
+	alloc_aarch64.o \
+	clear_mem_aarch64.o \
+	cpu_features_aarch64.o \
+	version.o \
+	aesni_emu.o \
+	snow3g_aarch64.o \
+	snow3g_aarch64_no_aesni.o \
+	snow3g_tables.o \
+	snow3g_iv.o \
+	error.o
+asm_generic_lib_objs := \
+	lookup_16x8bit_neon.o
+else
 c_lib_objs := \
 	mb_mgr_avx.o \
 	mb_mgr_avx2.o \
@@ -263,7 +306,6 @@ asm_generic_lib_objs := \
 	crc32_const.o \
 	poly1305.o \
 	chacha20_poly1305.o
-
 #
 # List of ASM modules (no-aesni directory)
 #
@@ -411,7 +453,7 @@ asm_sse_lib_objs := \
 	crc32_iuup_sse.o \
 	crc32_wimax_sse.o \
 	chacha20_sse.o \
-        memcpy_sse.o
+	memcpy_sse.o
 
 #
 # List of ASM modules (avx directory)
@@ -483,7 +525,7 @@ asm_avx_lib_objs := \
 	crc32_iuup_avx.o \
 	crc32_wimax_avx.o \
 	chacha20_avx.o \
-        memcpy_avx.o
+	memcpy_avx.o
 
 #
 # List of ASM modules (avx2 directory)
@@ -553,8 +595,8 @@ asm_avx512_lib_objs := \
 	mb_mgr_zuc_submit_flush_avx512.o \
 	mb_mgr_zuc_submit_flush_gfni_avx512.o \
 	chacha20_avx512.o \
-        poly_avx512.o \
-        poly_fma_avx512.o \
+	poly_avx512.o \
+	poly_fma_avx512.o \
 	ethernet_fcs_avx512.o \
 	crc16_x25_avx512.o \
 	crc32_refl_by16_vclmul_avx512.o \
@@ -589,9 +631,15 @@ asm_avx512_gcm_objs := \
 	gcm128_vaes_avx512.o gcm192_vaes_avx512.o gcm256_vaes_avx512.o \
 	gcm128_avx512.o gcm192_avx512.o gcm256_avx512.o
 
+endif
+
 #
 # build object files lists
 #
+ifeq ($(ARCH),aarch64)
+asm_obj_files := $(asm_generic_lib_objs)
+c_obj_files := $(c_lib_objs)
+else
 asm_obj_files := $(asm_generic_lib_objs) \
 	$(asm_noaesni_lib_objs) $(asm_noaesni_gcm_objs) \
 	$(asm_sse_lib_objs) $(asm_sse_gcm_objs) \
@@ -599,6 +647,7 @@ asm_obj_files := $(asm_generic_lib_objs) \
 	$(asm_avx2_lib_objs) $(asm_avx2_gcm_objs) \
 	$(asm_avx512_lib_objs) $(asm_avx512_gcm_objs)
 c_obj_files := $(c_lib_objs) $(c_gcm_objs)
+endif
 
 #
 # aggregate all objects files together and prefix with OBJDIR
@@ -687,6 +736,16 @@ $(dep_target_files): | $(OBJ_DIR)
 # - dependency file construction is part of the compilation
 #
 
+ifeq ($(ARCH),aarch64)
+$(OBJ_DIR)/%.o:aarch64/%.c
+	$(CC) -MMD $(OPT_AARCH64) -c $(CFLAGS) $< -o $@
+$(OBJ_DIR)/%.o:x86_64/%.c
+	$(CC) -MMD $(OPT_AARCH64) -c $(CFLAGS) $< -o $@
+$(OBJ_DIR)/%.o:aarch64/%.S
+	$(CC) -MMD $(OPT_AARCH64) -c $(CFLAGS) $< -o $@
+$(OBJ_DIR)/%.o:no-aesni/%.c
+	$(CC) -MMD $(OPT_NOAESNI) -c $(CFLAGS) $< -o $@
+else
 $(OBJ_DIR)/%.o:x86_64/%.c
 	$(CC) -MMD $(OPT_X86) -c $(CFLAGS) $< -o $@
 
@@ -769,7 +828,8 @@ endif
 ifeq ($(CC_HAS_CET),1)
 	$(LD) $(CET_LDFLAGS) -o $@.tmp $@
 	mv $@.tmp $@
-endif
+endif # CC_HAS_CET
+endif # AARCH64
 
 $(OBJ_DIR):
 	mkdir $(OBJ_DIR)
@@ -793,33 +853,33 @@ clean:
 help:
 	@echo "Available build options:"
 	@echo "DEBUG=n (default)"
-	@echo "          - this option will produce library not fit for debugging"
+	@echo "	  - this option will produce library not fit for debugging"
 	@echo "SHARED=y (default)"
-	@echo "          - this option will produce shared library"
+	@echo "	  - this option will produce shared library"
 	@echo "DEBUG_OPT=<optimization level>"
 	@echo "		- this option will modify the optimization level when DEBUG is used"
 	@echo "DEBUG=y   - this option will produce library fit for debugging"
 	@echo "SHARED=n  - this option will produce static library"
 	@echo "OBJ_DIR=obj (default)"
-	@echo "          - this option can be used to change build directory"
+	@echo "	  - this option can be used to change build directory"
 	@echo "LIB_DIR=. (default)"
-	@echo "          - this option can be used to change the library directory"
+	@echo "	  - this option can be used to change the library directory"
 	@echo "SAFE_DATA=n"
-	@echo "          - Sensitive data not cleared from registers and memory"
-	@echo "            at operation end"
+	@echo "	  - Sensitive data not cleared from registers and memory"
+	@echo "	    at operation end"
 	@echo "SAFE_DATA=y (default)"
-	@echo "          - Sensitive data cleared from registers and memory"
-	@echo "            at operation end"
+	@echo "	  - Sensitive data cleared from registers and memory"
+	@echo "	    at operation end"
 	@echo "SAFE_PARAM=n"
-	@echo "          - API input parameters not checked"
+	@echo "	  - API input parameters not checked"
 	@echo "SAFE_PARAM=y (default)"
-	@echo "          - API input parameters checked"
+	@echo "	  - API input parameters checked"
 	@echo "SAFE_LOOKUP=n"
-	@echo "          - Lookups depending on sensitive data might not be constant time"
+	@echo "	  - Lookups depending on sensitive data might not be constant time"
 	@echo "SAFE_LOOKUP=y (default)"
-	@echo "          - Lookups depending on sensitive data are constant time"
+	@echo "	  - Lookups depending on sensitive data are constant time"
 
-
+ifneq ($(ARCH), aarch64)
 CHECKPATCH ?= checkpatch.pl
 # checkpatch ignore settings:
 #   SPACING - produces false positives with tyepdefs and *
@@ -849,6 +909,7 @@ CHECKPATCH_FLAGS = --no-tree --no-signoff --emacs --no-color --ignore CODE_INDEN
 SOURCES_DIRS := . sse avx avx2 avx512 include no-aesni
 SOURCES := $(foreach dir,$(SOURCES_DIRS),$(wildcard $(dir)/*.[ch]) $(wildcard $(dir)/*.asm) $(wildcard $(dir)/*.inc))
 SOURCES_STYLE := $(foreach infile,$(SOURCES),$(infile)_style_check)
+endif
 
 .PHONY: style
 style: $(SOURCES_STYLE)

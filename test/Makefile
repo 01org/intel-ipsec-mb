@@ -30,9 +30,15 @@ XVALID_APP := ipsec_xvalid_test
 INSTPATH ?= /usr/include/intel-ipsec-mb.h
 LIB_DIR ?= ../lib
 
+CC ?= gcc
+
+ARCH = $(shell uname -m)
+
+ifneq ($(ARCH),aarch64)
 USE_YASM ?= n
 YASM ?= yasm
 NASM ?= nasm
+endif
 
 CFLAGS = -MMD -DLINUX -D_GNU_SOURCE -DNO_COMPAT_IMB_API_053 \
 	-W -Wall -Wextra -Wmissing-declarations -Wpointer-arith \
@@ -48,12 +54,13 @@ CC_HAS_CET = $(and $(shell $(CC) --target-help 2> /dev/null | grep -m1 -e "-z ib
 	$(shell $(CC) --help=common 2> /dev/null | grep -m1 -e "-fcf-protection" | wc -l))
 CET_LDFLAGS=-r -z ibt -z shstk
 
+ifneq ($(ARCH),aarch64)
+YASM_FLAGS := -f x64 -f elf64 -X gnu -g dwarf2 -DLINUX -D__linux__
+NASM_FLAGS := -Werror -felf64 -Xgnu -gdwarf -DLINUX -D__linux__
 ifeq ($(CC_HAS_CET),1)
 CFLAGS += -fcf-protection=full
 endif
-
-YASM_FLAGS := -f x64 -f elf64 -X gnu -g dwarf2 -DLINUX -D__linux__
-NASM_FLAGS := -Werror -felf64 -Xgnu -gdwarf -DLINUX -D__linux__
+endif
 
 LDFLAGS = -fPIE -z noexecstack -z relro -z now
 ifeq ($(CC_HAS_CET),1)
@@ -79,6 +86,22 @@ CFLAGS += -O3
 endif
 
 # ipsec_MB_testapp modules
+ifeq ($(ARCH),aarch64)
+SOURCES := main.c utils.c api_test.c snow3g_test.c direct_api_test.c clear_mem_test.c
+OBJECTS := $(SOURCES:%.c=%.o)
+
+# ipsec_xvalid_test modules
+XVALID_SOURCES := ipsec_xvalid.c utils.c
+XVALID_ASM := misc_aarch64.S
+XVALID_OBJECTS := $(XVALID_SOURCES:%.c=%.o) $(XVALID_ASM:%.S=%.o)
+
+# list of present dependency files
+DEP_FILES = $(wildcard ./*.d)
+
+# rule for compiling assembly code with producing dependencies
+%.o:%.S
+	$(CC) -c $(CFLAGS) $< -o $@
+else # AARCH64
 SOURCES := main.c gcm_test.c ctr_test.c customop_test.c des_test.c ccm_test.c \
 	cmac_test.c utils.c hmac_sha1_test.c hmac_sha256_sha512_test.c \
 	hmac_md5_test.c aes_test.c sha_test.c chained_test.c api_test.c pon_test.c \
@@ -88,8 +111,8 @@ SOURCES := main.c gcm_test.c ctr_test.c customop_test.c des_test.c ccm_test.c \
 OBJECTS := $(SOURCES:%.c=%.o)
 
 # ipsec_xvalid_test modules
-XVALID_ASM := misc.asm
 XVALID_SOURCES := ipsec_xvalid.c utils.c
+XVALID_ASM := misc.asm
 XVALID_OBJECTS := $(XVALID_SOURCES:%.c=%.o) $(XVALID_ASM:%.asm=%.o)
 
 # list of present dependency files
@@ -105,7 +128,8 @@ endif
 ifeq ($(CC_HAS_CET),1)
 	$(LD) $(CET_LDFLAGS) -o $@.tmp $@
 	mv $@.tmp $@
-endif
+endif # CC_HAS_CET
+endif # AARCH64
 
 # targets come here
 all: $(TEST_APP) $(XVALID_APP)
